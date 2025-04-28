@@ -1,0 +1,32 @@
+{
+  "I": {
+    "f1": 0.975,
+    "precision": 1.0,
+    "recall": 0.951
+  },
+  "N": {
+    "f1": 0.975,
+    "precision": 1.0,
+    "recall": 0.951
+  },
+  "V": {
+    "f1": 0.974,
+    "precision": 1.0,
+    "recall": 0.95
+  },
+  "E": {
+    "f1": 0.974,
+    "precision": 0.974,
+    "recall": 0.974
+  },
+  "S": {
+    "f1": 0.974,
+    "precision": 0.974,
+    "recall": 0.974
+  },
+  "T": {
+    "f1": 0.987,
+    "precision": 1.0,
+    "recall": 0.975
+  }
+}
