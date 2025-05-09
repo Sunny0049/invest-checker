@@ -7,12 +7,15 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizer, BertModel
 from torch.optim import AdamW
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_curve, roc_auc_score
+from skmultilearn.model_selection import IterativeStratification
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 import pandas as pd
 import numpy as np
 import json
 import datetime
 import os
+import re
 
 import sys
 
@@ -21,7 +24,8 @@ try:
 except ImportError as e:
     print("T5Tokenizer requires SentencePiece. Please install it using `pip install sentencepiece`.")
     raise e
-
+my_start_time = datetime.datetime.now()
+print("Start time: {my_start_time}")
 
 # Optional: For backtranslation or paraphrasing
 from transformers import AutoModelForSeq2SeqLM, T5Tokenizer
@@ -31,7 +35,7 @@ from transformers import AutoModelForSeq2SeqLM, T5Tokenizer
 LABELS = ['I', 'N', 'V', 'E', 'S', 'T']
 MAX_LEN = 256
 BATCH_SIZE = 8
-EPOCHS = 10
+EPOCHS = 15
 LR = 2e-5
 
 # Set seeds for reproducibility
@@ -66,7 +70,6 @@ class INVESTDataset(Dataset):
             'attention_mask': encoding['attention_mask'].squeeze(),
             'labels': torch.tensor(self.labels[idx], dtype=torch.float)
         }
-        
 
 
 # Model
@@ -163,7 +166,7 @@ def evaluate(model, val_loader, criterion, device, epoch=None):
 
 # Load paraphrasing model (Option B). This is to improve backtranslation or paraphrasing
 para_model_name = "Vamsi/T5_Paraphrase_Paws"
-para_tokenizer = T5Tokenizer.from_pretrained(para_model_name)
+para_tokenizer = T5Tokenizer.from_pretrained(para_model_name, legacy=False)
 para_model = AutoModelForSeq2SeqLM.from_pretrained(para_model_name).to(device)
 
 def paraphrase(text, num_return_sequences=1):
@@ -188,17 +191,22 @@ def paraphrase(text, num_return_sequences=1):
     )
     return [para_tokenizer.decode(o, skip_special_tokens=True) for o in outputs]
 
-
-
-
 # Load dataset
-df = pd.read_csv("invest_user_stories.csv")
-texts = df['story'].astype(str).fillna("").tolist()
+df = pd.read_csv("augmented_invest_dataset.csv")#08_invest_user_stories.csv
+
+# Apply preprocess to remove noise through preprocessing.py
+from preprocessing import clean_user_story
+
+df['story'] = df['story'].astype(str).fillna("").apply(clean_user_story)
+#print("Function imported successfully:", clean_user_story)
+
+
+texts = df['story'].tolist()
 labels = df[LABELS].fillna(0).astype(np.float32).values
 labels = (labels > 0).astype(int)
 
 # Stratified split
-from skmultilearn.model_selection import IterativeStratification
+
 stratifier = IterativeStratification(n_splits=2, order=1)
 train_indices, test_indices = next(stratifier.split(np.array(texts).reshape(-1, 1), labels))
 train_texts = [texts[i] for i in train_indices]
@@ -263,7 +271,7 @@ def train_and_evaluate():
 
     # Load best model after early stopping
     try:
-        model.load_state_dict(torch.load("best_model.pt"))
+        model.load_state_dict(torch.load("best_model.pt", weights_only=True))
     except Exception as e:
         print(f"Load best model file error: {e}")
 
@@ -329,6 +337,7 @@ def evaluate_and_save_results(y_true, y_scores, thresholds, out_file="results_me
             json.dump(report, f, indent=2)
         print(json.dumps(report, indent=2))
 
+
 # Model and optimization in modular format
 
 #New modualization for metrics visualization
@@ -371,14 +380,22 @@ if __name__ == "__main__":
 # Save model
 save_path = "models/invest_bert"
 os.makedirs(save_path, exist_ok=True)
+
+# Save model and tokenizer on path models/invest_bert
 torch.save(model.state_dict(), os.path.join(save_path, "invest_bert_model.pt"))
 tokenizer.save_pretrained(save_path)
+
+#Save model and tockenizer on current directory
 torch.save(model.state_dict(), "invest_bert_model.pt")
 tokenizer.save_pretrained("invest_tokenizer")
 
 #Save model and tokenizer for paraphrasing
 para_model.save_pretrained("invest_paraphrase_model")
 para_tokenizer.save_pretrained("invest_paraphrase_tokenizer")
+
+#Calculate script runing time
+my_end_time = datetime.datetime.now()
+print(f"End time: {my_end_time} - Duration {my_start_time-my_end_time}")
 
 # Generate metrics visualization
 import matplotlib.pyplot as plt
@@ -398,7 +415,19 @@ def plot_metrics(logs):
     plt.savefig("training_loss_plot.png")
     plt.show()
 
-
+"""
+[I, N, V, E, S, T]
+As a user, I want to play online - Evaluator:[0, 0, 0, 0, 0, 0] ChatGPT:[1,1,0,0,1,0]
+As a user, I want to play online after entering bonus code for free - Evaluator:[1, 1, 1, 1, 1, 1] ChatGPT:[1,1,1,0,1,0]
+As a tester, I want to register with username, email address and a password 
+  - username should be verified and appropriate indication shall be shown to the user 
+  - Email address shall be verified for validity 
+  - password length shall be 8 digit long which is verified and user is prompted if not correct
+  Evaluator:[1, 1, 1, 1, 1, 1] ChatGPT: [1, 1, 1, 1, 0, 1]
+As a customer, I want to pay with a credit card and redeem points and check past orders [1, 1, 1, 1, 1, 0] [1, 1, 1, 1, 0, 1] 
+As a developer, I want to refactor the login module to improve code readability. [1, 1, 1, 1, 1, 1] [1, 1, 0, 1, 1, 1]
+As a system, I should auto-heal when errors happen. [1, 1, 1, 1, 1, 0][1, 0, 0, 1, 1, 0]
+"""
 
 
 
